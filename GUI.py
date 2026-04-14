@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox, QProgressBar, QScrollArea, QGridLayout, QSizePolicy,
     QTextEdit, QFileDialog, QSlider, QCheckBox, QSplitter, QDialog,
     QDialogButtonBox, QButtonGroup, QListWidget, QListWidgetItem,
+    QFormLayout,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QRect, QPoint, QSize, QTimer
 from PySide6.QtGui import (
@@ -65,6 +66,9 @@ QPushButton#btn_next:hover {{ background-color:#eba0ac; }}
 QPushButton#btn_locked {{ background-color:rgba(49,50,68,0.30); color:rgba(147,153,178,0.25); border:1px dashed rgba(69,71,90,0.25); border-radius:6px; padding:7px 14px; font-size:12px; }}
 
 QPushButton#step_active {{ background-color:{WARNING}; color:{DARK_BG}; border:none; border-radius:6px; padding:7px 14px; font-size:12px; font-weight:700; }}
+
+QPushButton#estop {{ background-color:#ee2222; color:white; border:3px solid #ff5555; border-radius:8px; padding:10px 14px; font-size:14px; font-weight:900; letter-spacing:2px; }}
+QPushButton#estop:hover {{ background-color:#ff3333; }}
 
 QGroupBox {{ background-color:{CARD_BG}; border:1px solid {BORDER}; border-radius:10px; margin-top:16px; padding:18px 10px 10px 10px; font-weight:bold; color:{ACCENT}; }}
 QGroupBox::title {{ subcontrol-origin:margin; left:14px; padding:0 6px; background-color:{DARK_BG}; border-radius:3px; font-size:11px; }}
@@ -163,6 +167,91 @@ class ApproachZDialog(QDialog):
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept); btns.rejected.connect(self.reject); lay.addWidget(btns)
     def get_z(self): return self.spin.value()
+
+
+# =============================================================================
+#  PALLET CONFIG DIALOG — forces operator to review/enter all measurements
+# =============================================================================
+class PalletConfigDialog(QDialog):
+    """Dialog that forces operator to enter all pallet measurements + approach Z."""
+    def __init__(self, parent=None, defaults=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pallet Configuration"); self.setMinimumWidth(420)
+        d = defaults or {}
+        lay = QVBoxLayout(self); lay.setSpacing(10); lay.setContentsMargins(20,20,20,20)
+
+        warn = QLabel("⚠ Review ALL measurements before starting.\nIncorrect values will cause collisions or misalignment.")
+        warn.setObjectName("status"); warn.setWordWrap(True); lay.addWidget(warn)
+
+        # Approach Z
+        az_row = QHBoxLayout()
+        az_row.addWidget(QLabel("Approach Z:"))
+        self.spin_az = QDoubleSpinBox(); self.spin_az.setRange(50,500); self.spin_az.setDecimals(1)
+        self.spin_az.setValue(d.get("approach_z", 200.0)); self.spin_az.setSuffix(" mm")
+        az_row.addWidget(self.spin_az); lay.addLayout(az_row)
+
+        # Object dimensions
+        og = QGroupBox("Object Dimensions"); ogl = QGridLayout(og); ogl.setContentsMargins(10,20,10,10)
+        self.spin_w = QDoubleSpinBox(); self.spin_w.setRange(1,500); self.spin_w.setDecimals(1)
+        self.spin_w.setValue(d.get("obj_w",50)); self.spin_w.setSuffix(" mm")
+        self.spin_d = QDoubleSpinBox(); self.spin_d.setRange(1,500); self.spin_d.setDecimals(1)
+        self.spin_d.setValue(d.get("obj_d",50)); self.spin_d.setSuffix(" mm")
+        self.spin_h = QDoubleSpinBox(); self.spin_h.setRange(1,500); self.spin_h.setDecimals(1)
+        self.spin_h.setValue(d.get("obj_h",20)); self.spin_h.setSuffix(" mm")
+        ogl.addWidget(QLabel("Width  (X):"),0,0);  ogl.addWidget(self.spin_w,0,1)
+        ogl.addWidget(QLabel("Length (Y):"),1,0);   ogl.addWidget(self.spin_d,1,1)
+        ogl.addWidget(QLabel("Height (Z):"),2,0);   ogl.addWidget(self.spin_h,2,1)
+        lay.addWidget(og)
+
+        # Gaps
+        gg = QGroupBox("Gaps Between Pieces"); ggl = QGridLayout(gg); ggl.setContentsMargins(10,20,10,10)
+        self.spin_gx = QDoubleSpinBox(); self.spin_gx.setRange(0,100); self.spin_gx.setDecimals(1)
+        self.spin_gx.setValue(d.get("gap_x",5)); self.spin_gx.setSuffix(" mm")
+        self.spin_gy = QDoubleSpinBox(); self.spin_gy.setRange(0,100); self.spin_gy.setDecimals(1)
+        self.spin_gy.setValue(d.get("gap_y",5)); self.spin_gy.setSuffix(" mm")
+        ggl.addWidget(QLabel("Gap X:"),0,0); ggl.addWidget(self.spin_gx,0,1)
+        ggl.addWidget(QLabel("Gap Y:"),1,0); ggl.addWidget(self.spin_gy,1,1)
+        lay.addWidget(gg)
+
+        # Grid
+        sg = QGroupBox("Grid Size"); sgl = QGridLayout(sg); sgl.setContentsMargins(10,20,10,10)
+        self.spin_cols = QSpinBox(); self.spin_cols.setRange(1,20); self.spin_cols.setValue(d.get("cols",3))
+        self.spin_rows = QSpinBox(); self.spin_rows.setRange(1,20); self.spin_rows.setValue(d.get("rows",3))
+        self.spin_layers = QSpinBox(); self.spin_layers.setRange(1,10); self.spin_layers.setValue(d.get("layers",1))
+        sgl.addWidget(QLabel("Columns:"),0,0); sgl.addWidget(self.spin_cols,0,1)
+        sgl.addWidget(QLabel("Rows:"),1,0);    sgl.addWidget(self.spin_rows,1,1)
+        sgl.addWidget(QLabel("Layers:"),2,0);  sgl.addWidget(self.spin_layers,2,1)
+        lay.addWidget(sg)
+
+        # Preview
+        self.preview_lbl = QLabel(); self.preview_lbl.setObjectName("subtitle"); self.preview_lbl.setWordWrap(True)
+        lay.addWidget(self.preview_lbl)
+        for w in (self.spin_w, self.spin_d, self.spin_h, self.spin_gx, self.spin_gy,
+                  self.spin_cols, self.spin_rows, self.spin_layers):
+            w.valueChanged.connect(self._update_preview)
+        self._update_preview()
+
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept); btns.rejected.connect(self.reject); lay.addWidget(btns)
+
+    def _update_preview(self):
+        px = self.spin_w.value() + self.spin_gx.value()
+        py = self.spin_d.value() + self.spin_gy.value()
+        total = self.spin_cols.value() * self.spin_rows.value() * self.spin_layers.value()
+        tw = px * self.spin_cols.value() - self.spin_gx.value()
+        td = py * self.spin_rows.value() - self.spin_gy.value()
+        self.preview_lbl.setText(
+            f"Pitch X={px:.1f}mm  Pitch Y={py:.1f}mm  Layer ΔZ={self.spin_h.value():.1f}mm\n"
+            f"Total cells: {total}  |  Footprint: {tw:.0f} × {td:.0f} mm\n"
+            f"Grid grows: Cols → +X  |  Rows → −Y  |  Layers → +Z")
+
+    def get_config(self):
+        return {
+            "approach_z": self.spin_az.value(),
+            "obj_w": self.spin_w.value(), "obj_d": self.spin_d.value(), "obj_h": self.spin_h.value(),
+            "gap_x": self.spin_gx.value(), "gap_y": self.spin_gy.value(),
+            "cols": self.spin_cols.value(), "rows": self.spin_rows.value(), "layers": self.spin_layers.value(),
+        }
 
 
 # =============================================================================
@@ -323,7 +412,6 @@ class AdvancedJogPanel(QGroupBox):
     def __init__(self, title="Jog Robot"):
         super().__init__(title)
         main=QVBoxLayout(self); main.setSpacing(4); main.setContentsMargins(8,18,8,6)
-        # Row 1: mode + step/vel combined
         top=QHBoxLayout(); top.setSpacing(4)
         self.mode_combo=QComboBox(); self.mode_combo.addItems(["Step","Continuous"]); self.mode_combo.setFixedWidth(90)
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed); top.addWidget(self.mode_combo)
@@ -334,7 +422,6 @@ class AdvancedJogPanel(QGroupBox):
         self.vel_slider.valueChanged.connect(lambda v: self.vel_value_lbl.setText(str(v)))
         top.addWidget(self.vel_slider,1); top.addWidget(self.vel_value_lbl)
         main.addLayout(top)
-        # Row 2-3: axis buttons — XY on one row, Z on next
         for axes_row in [("X","Y"),("Z",)]:
             row=QHBoxLayout(); row.setSpacing(4)
             for axis in axes_row:
@@ -405,23 +492,23 @@ class RobotTeachApp(QMainWindow):
         self._guide_approach_z=self.APPROACH_Z_DEFAULT
         self._pal_guide_step=0; self._pal_waypoints=[]; self._pal_approach_z=self.APPROACH_Z_DEFAULT
         self._motion_busy=False; self._calib_teach_mode=False
+        # --- E-STOP flag: checked before every robot motion in production ---
+        self._estop_flag=False
         self.jog_timer=QTimer(); self.jog_timer.timeout.connect(self._update_pose_display)
         self.prod_cam_timer=QTimer(); self.prod_cam_timer.timeout.connect(self._prod_update_cam); self.prod_cap=None
         self.setStyleSheet(GLOBAL_STYLE); self._build_ui()
 
     # -----------------------------------------------------------------
-    #  BUTTON VISUAL HELPERS (no logic changes — pure style)
+    #  BUTTON VISUAL HELPERS
     # -----------------------------------------------------------------
     def _restyle_btn(self, btn, obj_name):
         btn.setObjectName(obj_name)
         btn.style().unpolish(btn); btn.style().polish(btn); btn.update()
 
     def _pp_style_buttons(self):
-        """Highlight the ONE button the operator must press next; lock the rest."""
         all_btns = [self.btn_pp_start, self.btn_pp_capture, self.btn_pp_recapture,
                     self.btn_pp_select, self.btn_pp_save_wp, self.btn_pp_add_cycle,
                     self.btn_pp_finish, self.btn_pp_cancel]
-        # Determine which button(s) are the primary "next action"
         next_set = set()
         if self._guide_step >= 5:
             next_set = {self.btn_pp_add_cycle, self.btn_pp_finish}
@@ -443,7 +530,6 @@ class RobotTeachApp(QMainWindow):
                 self._restyle_btn(btn, orig)
             else:
                 self._restyle_btn(btn, "btn_locked")
-        # Step indicator
         si = min(self._guide_step, len(self.PP_STEPS))
         if si >= len(self.PP_STEPS):
             self.pp_step_ind.set_all_done()
@@ -451,7 +537,6 @@ class RobotTeachApp(QMainWindow):
             self.pp_step_ind.set_step(si)
 
     def _pal_style_buttons(self):
-        """Same visual enforcement for palletizing."""
         all_btns = [self.btn_pal_start, self.btn_pal_capture, self.btn_pal_recapture,
                     self.btn_pal_select, self.btn_pal_save_wp, self.btn_pal_finish,
                     self.btn_pal_cancel]
@@ -525,7 +610,16 @@ class RobotTeachApp(QMainWindow):
             if self.prod_cap: self.prod_cap.release(); self.prod_cap=None
             self.btn_prod_cam.setText("Live Camera")
         if index==1: self._update_robot_status(); self.jog_timer.start(500)
-        else: self.jog_timer.stop()
+        else:
+            self.jog_timer.stop()
+            # Exit manual mode if leaving Free Jog page while it's active
+            if hasattr(self, 'btn_fj_manual') and self.btn_fj_manual.isChecked():
+                if self.robot:
+                    try: self.robot.set_mode(0); self.robot.set_state(0)
+                    except: pass
+                self.btn_fj_manual.setChecked(False)
+                self.btn_fj_manual.setText("Manual Move (Freedrive)")
+                self.btn_fj_manual.setStyleSheet("")
 
     # ===== PAGE 0: DASHBOARD =====
     def _page_dashboard(self):
@@ -559,7 +653,9 @@ class RobotTeachApp(QMainWindow):
             self._update_robot_status()
         except Exception as e: QMessageBox.critical(self,"Error",str(e))
 
-    # ===== PAGE 1: FREE JOG =====
+    # =========================================================================
+    #  PAGE 1: FREE JOG  (with rotation jog)
+    # =========================================================================
     def _page_free_jog(self):
         page=QWidget(); scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         cw=QWidget(); lay=QVBoxLayout(cw); lay.setContentsMargins(16,16,16,16); lay.setSpacing(8)
@@ -574,11 +670,43 @@ class RobotTeachApp(QMainWindow):
         pl.addWidget(self.fj_pose_x,0,0); pl.addWidget(self.fj_pose_y,0,1); pl.addWidget(self.fj_pose_z,0,2)
         pl.addWidget(self.fj_pose_roll,1,0); pl.addWidget(self.fj_pose_pitch,1,1); pl.addWidget(self.fj_pose_yaw,1,2)
         lay.addWidget(pb)
-        self.fj_jog=AdvancedJogPanel("Jog Robot")
+
+        # --- Translation jog ---
+        self.fj_jog=AdvancedJogPanel("Jog Translation (XYZ)")
         self.fj_jog.jog_step.connect(self._fj_jog_step)
         self.fj_jog.jog_cont_start.connect(self._fj_jog_cont_start)
         self.fj_jog.jog_cont_stop.connect(self._fj_jog_cont_stop)
         lay.addWidget(self.fj_jog)
+
+        # --- Rotation jog (Roll / Pitch / Yaw) — Step + Continuous ---
+        rg=QGroupBox("Jog Rotation (RPY)")
+        rm=QVBoxLayout(rg); rm.setSpacing(4); rm.setContentsMargins(8,18,8,6)
+        rtop=QHBoxLayout(); rtop.setSpacing(4)
+        self.fj_rot_mode=QComboBox(); self.fj_rot_mode.addItems(["Step","Continuous"]); self.fj_rot_mode.setFixedWidth(90)
+        self.fj_rot_mode.currentTextChanged.connect(self._fj_rot_mode_changed); rtop.addWidget(self.fj_rot_mode)
+        self.fj_rot_step=QDoubleSpinBox(); self.fj_rot_step.setRange(0.1,30.0); self.fj_rot_step.setValue(2.0); self.fj_rot_step.setSuffix(" °"); self.fj_rot_step.setFixedWidth(80)
+        rtop.addWidget(self.fj_rot_step)
+        self.fj_rot_vel=QSlider(Qt.Horizontal); self.fj_rot_vel.setRange(5,100); self.fj_rot_vel.setValue(20)
+        self.fj_rot_vel_lbl=QLabel("20"); self.fj_rot_vel_lbl.setFixedWidth(24)
+        self.fj_rot_vel.valueChanged.connect(lambda v: self.fj_rot_vel_lbl.setText(str(v)))
+        rtop.addWidget(self.fj_rot_vel,1); rtop.addWidget(self.fj_rot_vel_lbl)
+        rm.addLayout(rtop)
+        for axes_row in [("Roll","Pitch"),("Yaw",)]:
+            row=QHBoxLayout(); row.setSpacing(4)
+            for axis in axes_row:
+                minus=QPushButton(f"-{axis}"); minus.setObjectName("action"); minus.setFocusPolicy(Qt.NoFocus); minus.setFixedHeight(30)
+                plus=QPushButton(f"+{axis}"); plus.setObjectName("action"); plus.setFocusPolicy(Qt.NoFocus); plus.setFixedHeight(30)
+                minus.clicked.connect(lambda c=False,a=axis: self._fj_jog_rot(a,-1))
+                plus.clicked.connect(lambda c=False,a=axis: self._fj_jog_rot(a,+1))
+                minus.pressed.connect(lambda a=axis: self._fj_jog_rot_cont_start(a,-1))
+                minus.released.connect(self._fj_jog_rot_cont_stop)
+                plus.pressed.connect(lambda a=axis: self._fj_jog_rot_cont_start(a,+1))
+                plus.released.connect(self._fj_jog_rot_cont_stop)
+                row.addWidget(minus,1); row.addWidget(plus,1)
+            rm.addLayout(row)
+        self._fj_rot_mode_changed("Step")
+        lay.addWidget(rg)
+
         self.fj_gripper=GripperControlPanel("Gripper Control (TO 0 = power)")
         self.fj_gripper.action_requested.connect(self._gripper_full_action); lay.addWidget(self.fj_gripper)
         bg=QGridLayout(); bg.setSpacing(6)
@@ -586,10 +714,12 @@ class RobotTeachApp(QMainWindow):
         self.btn_fj_disable=QPushButton("Disable Robot"); self.btn_fj_disable.setObjectName("action"); self.btn_fj_disable.clicked.connect(self._fj_disable)
         self.btn_fj_set_home=QPushButton("Set Current as Home"); self.btn_fj_set_home.setObjectName("action"); self.btn_fj_set_home.clicked.connect(self._fj_set_home)
         self.btn_fj_goto_home=QPushButton("Move to Home"); self.btn_fj_goto_home.setObjectName("action"); self.btn_fj_goto_home.clicked.connect(self._fj_goto_home)
-        self.btn_fj_estop=QPushButton("E-STOP"); self.btn_fj_estop.setObjectName("danger"); self.btn_fj_estop.clicked.connect(self._fj_estop)
+        self.btn_fj_manual=QPushButton("Manual Move (Freedrive)"); self.btn_fj_manual.setObjectName("action"); self.btn_fj_manual.setCheckable(True); self.btn_fj_manual.clicked.connect(self._fj_manual_toggle)
+        self.btn_fj_estop=QPushButton("⛔ EMERGENCY STOP"); self.btn_fj_estop.setObjectName("estop"); self.btn_fj_estop.clicked.connect(self._global_estop)
         bg.addWidget(self.btn_fj_enable,0,0); bg.addWidget(self.btn_fj_disable,0,1)
         bg.addWidget(self.btn_fj_set_home,1,0); bg.addWidget(self.btn_fj_goto_home,1,1)
-        bg.addWidget(self.btn_fj_estop,2,0,1,2)
+        bg.addWidget(self.btn_fj_manual,2,0,1,2)
+        bg.addWidget(self.btn_fj_estop,3,0,1,2)
         lay.addLayout(bg); lay.addStretch()
         scroll.setWidget(cw); ml=QVBoxLayout(page); ml.setContentsMargins(0,0,0,0); ml.addWidget(scroll); return page
 
@@ -618,6 +748,40 @@ class RobotTeachApp(QMainWindow):
             np_=list(pos[:6]); np_[idx]+=delta
             self._robot_move_to_guarded(*np_[:3],roll=np_[3],pitch=np_[4],yaw=np_[5],speed=self.MOVE_SPEED_SLOW,wait=True)
         except Exception as e: print(f"[FJ Step] {e}")
+    def _fj_jog_rot(self, axis, sign):
+        """Step-jog a rotation axis by the configured degree increment."""
+        if self.fj_rot_mode.currentText()!="Step": return
+        if self._motion_busy or not self.robot: return
+        try:
+            _,pos=self.robot.get_position()
+            if not pos: return
+            idx={"Roll":3,"Pitch":4,"Yaw":5}.get(axis)
+            if idx is None: return
+            np_=list(pos[:6]); np_[idx]+=self.fj_rot_step.value()*sign
+            self._robot_move_to_guarded(np_[0],np_[1],np_[2],roll=np_[3],pitch=np_[4],yaw=np_[5],speed=self.MOVE_SPEED_SLOW,wait=True)
+        except Exception as e: print(f"[FJ Rot] {e}")
+    def _fj_rot_mode_changed(self, m):
+        s=m=="Step"
+        self.fj_rot_step.setVisible(s); self.fj_rot_vel.setVisible(not s); self.fj_rot_vel_lbl.setVisible(not s)
+    def _fj_jog_rot_cont_start(self, axis, sign):
+        """Continuous rotation: send far target at configured angular velocity."""
+        if self.fj_rot_mode.currentText()!="Continuous": return
+        if not self.robot: return
+        try:
+            self._ensure_robot_ready(); _,pos=self.robot.get_position()
+            if not pos: return
+            idx={"Roll":3,"Pitch":4,"Yaw":5}.get(axis)
+            if idx is None: return
+            t=list(pos[:6]); t[idx]+=sign*90  # far target ±90°
+            vel=self.fj_rot_vel.value()
+            self.robot.set_position(x=t[0],y=t[1],z=t[2],roll=t[3],pitch=t[4],yaw=t[5],speed=vel,mvacc=1000,wait=False)
+        except Exception as e: print(f"[FJ Rot Cont] {e}")
+    def _fj_jog_rot_cont_stop(self):
+        """Halt continuous rotation movement."""
+        if self.fj_rot_mode.currentText()!="Continuous": return
+        if not self.robot: return
+        try: self.robot.set_state(4); time.sleep(0.02); self.robot.set_mode(0); self.robot.set_state(0)
+        except Exception as e: print(f"[FJ Rot Stop] {e}")
     def _fj_jog_cont_start(self, axis, sign):
         if not self.robot: return
         try:
@@ -634,7 +798,15 @@ class RobotTeachApp(QMainWindow):
         except Exception as e: print(f"[FJ Stop] {e}")
     def _fj_enable(self):
         if not self.robot: QMessageBox.warning(self,"","Not connected."); return
-        try: self.robot.clean_error(); self.robot.clean_warn(); self.robot.motion_enable(True); self.robot.set_mode(0); self.robot.set_state(0); self._update_robot_status()
+        try:
+            self.robot.clean_error(); self.robot.clean_warn(); self.robot.motion_enable(True); self.robot.set_mode(0); self.robot.set_state(0)
+            self._estop_flag=False  # clear E-STOP on re-enable
+            # Reset manual mode toggle if it was active
+            if self.btn_fj_manual.isChecked():
+                self.btn_fj_manual.setChecked(False)
+                self.btn_fj_manual.setText("Manual Move (Freedrive)")
+                self.btn_fj_manual.setStyleSheet("")
+            self._update_robot_status()
         except Exception as e: QMessageBox.critical(self,"Error",str(e))
     def _fj_disable(self):
         if not self.robot: return
@@ -653,8 +825,42 @@ class RobotTeachApp(QMainWindow):
         if not os.path.exists(self.home_position_path): QMessageBox.warning(self,"","No home set."); return
         with open(self.home_position_path) as f: h=json.load(f)
         self._robot_move_to(h["x"],h["y"],h["z"],h["roll"],h["pitch"],h["yaw"],speed=self.MOVE_SPEED)
-    def _fj_estop(self):
-        if self.robot: self.robot.set_state(4)
+    def _fj_manual_toggle(self):
+        """Toggle xArm manual/freedrive mode (mode 2) — operator can move robot by hand."""
+        if not self.robot:
+            QMessageBox.warning(self,"","Not connected."); self.btn_fj_manual.setChecked(False); return
+        try:
+            if self.btn_fj_manual.isChecked():
+                self.robot.set_mode(2); self.robot.set_state(0)
+                self.btn_fj_manual.setText("⏹ Exit Manual Mode")
+                self.btn_fj_manual.setStyleSheet(
+                    f"background-color:{WARNING};color:{DARK_BG};border:none;border-radius:6px;"
+                    f"padding:7px 14px;font-size:12px;font-weight:700;")
+            else:
+                self.robot.set_mode(0); self.robot.set_state(0)
+                self.btn_fj_manual.setText("Manual Move (Freedrive)")
+                self.btn_fj_manual.setStyleSheet("")  # reset to stylesheet default
+        except Exception as e:
+            QMessageBox.critical(self,"Error",str(e)); self.btn_fj_manual.setChecked(False)
+
+    # -----------------------------------------------------------------
+    #  GLOBAL E-STOP — used from Free Jog AND Production
+    # -----------------------------------------------------------------
+    def _global_estop(self):
+        """Immediately halt all motion, disable motors, and set flag to break production loops."""
+        self._estop_flag=True
+        if self.robot:
+            try:
+                self.robot.set_state(4)            # controller-level halt
+                self.robot.motion_enable(False)    # disable motors — arm goes limp
+            except: pass
+        # Exit manual mode if active
+        if hasattr(self, 'btn_fj_manual') and self.btn_fj_manual.isChecked():
+            self.btn_fj_manual.setChecked(False)
+            self.btn_fj_manual.setText("Manual Move (Freedrive)")
+            self.btn_fj_manual.setStyleSheet("")
+        self._update_robot_status()
+        print("[E-STOP] TRIGGERED — motors disabled")
 
     # ===== HELPERS: jog from actual position =====
     def _jog_step_from_robot(self, axis, delta, spin_x, spin_y, spin_z):
@@ -715,12 +921,12 @@ class RobotTeachApp(QMainWindow):
         self.calib_log=QTextEdit(); self.calib_log.setReadOnly(True); self.calib_log.setMaximumHeight(80); left.addWidget(self.calib_log)
         content.addLayout(left,stretch=2)
         right=QVBoxLayout(); right.setSpacing(8)
-        pb=QGroupBox("Pattern (mm)"); pg=QGridLayout(pb); pg.setContentsMargins(8,18,8,6)
+        pb_=QGroupBox("Pattern (mm)"); pg=QGridLayout(pb_); pg.setContentsMargins(8,18,8,6)
         self.calib_cols=QSpinBox(); self.calib_cols.setRange(2,20); self.calib_cols.setValue(4)
         self.calib_rows=QSpinBox(); self.calib_rows.setRange(2,20); self.calib_rows.setValue(11)
         self.calib_sq=QDoubleSpinBox(); self.calib_sq.setRange(1,100); self.calib_sq.setValue(15.0)
         for i,(l,w) in enumerate([("Cols:",self.calib_cols),("Rows:",self.calib_rows),("Sp:",self.calib_sq)]): pg.addWidget(QLabel(l),i,0); pg.addWidget(w,i,1)
-        right.addWidget(pb)
+        right.addWidget(pb_)
         bc=QPushButton("Compute Homography"); bc.setObjectName("action"); bc.clicked.connect(self._calib_compute); right.addWidget(bc)
         ob=QGroupBox("Robot ↔ Camera Offset (mm)"); og=QGridLayout(ob); og.setContentsMargins(8,18,8,6)
         self.calib_off_x=QDoubleSpinBox(); self.calib_off_x.setRange(-1000,1000); self.calib_off_x.setValue(200.0); self.calib_off_x.setDecimals(1)
@@ -764,8 +970,7 @@ class RobotTeachApp(QMainWindow):
             for i in range(len(pts)-1):
                 p1=tuple(pts[i].astype(int)); p2=tuple(pts[i+1].astype(int))
                 cv2.line(display,p1,p2,(0,0,255),2,cv2.LINE_AA)
-            for pt in pts:
-                cv2.circle(display,tuple(pt.astype(int)),8,(0,0,255),2,cv2.LINE_AA)
+            for pt in pts: cv2.circle(display,tuple(pt.astype(int)),8,(0,0,255),2,cv2.LINE_AA)
             tcp_pt=tuple(pts[0].astype(int))
             cv2.circle(display,tcp_pt,14,(0,230,255),3,cv2.LINE_AA)
             cv2.circle(display,tcp_pt,5,(0,230,255),-1,cv2.LINE_AA)
@@ -788,7 +993,7 @@ class RobotTeachApp(QMainWindow):
             for j in range(c): objp[i*c+j]=(j*sq*2+(i%2)*sq,i*sq)
         H,_=cv2.findHomography(np.vstack(self.calib_image_pts),np.vstack([objp]*len(self.calib_image_pts)))
         self.H_matrix=H; self.H_inv=np.linalg.inv(H); np.save(self.homography_path,H)
-        self.calib_status.setText("Homography: Ready"); self.calib_log.append("Saved. Use Teach to set offsets."); self.calib_image_pts.clear()
+        self.calib_status.setText("Homography: Ready"); self.calib_log.append("Saved."); self.calib_image_pts.clear()
     def _calib_teach_toggle(self):
         if self.btn_calib_teach.isChecked():
             if self.H_matrix is None: QMessageBox.warning(self,"","Compute homography first."); self.btn_calib_teach.setChecked(False); return
@@ -830,13 +1035,13 @@ class RobotTeachApp(QMainWindow):
         self.btn_vis_del_all=QPushButton("Clear All"); self.btn_vis_del_all.setObjectName("danger"); self.btn_vis_del_all.clicked.connect(self._vis_delete_all)
         for b in (bc,self.btn_vis_save,bu,self.btn_vis_train,self.btn_vis_test,self.btn_vis_del_last,self.btn_vis_del_all): ctrl.addWidget(b)
         lay.addLayout(ctrl)
-        pb=QGroupBox("Parameters"); pg=QHBoxLayout(pb); pg.setContentsMargins(10,20,10,8); pg.setSpacing(8)
+        pb_=QGroupBox("Parameters"); pg=QHBoxLayout(pb_); pg.setContentsMargins(10,20,10,8); pg.setSpacing(8)
         self.spin_epochs=QSpinBox(); self.spin_epochs.setRange(5,200); self.spin_epochs.setValue(30)
         self.spin_aug=QSpinBox(); self.spin_aug.setRange(5,100); self.spin_aug.setValue(25)
         self.spin_imgsz=QSpinBox(); self.spin_imgsz.setRange(320,1280); self.spin_imgsz.setSingleStep(32); self.spin_imgsz.setValue(640)
         self.spin_conf=QDoubleSpinBox(); self.spin_conf.setRange(0.05,0.95); self.spin_conf.setSingleStep(0.05); self.spin_conf.setValue(0.25)
         for l,w in [("Epochs:",self.spin_epochs),("Aug:",self.spin_aug),("Img:",self.spin_imgsz),("Conf:",self.spin_conf)]: pg.addWidget(QLabel(l)); pg.addWidget(w)
-        lay.addWidget(pb)
+        lay.addWidget(pb_)
         self.vis_log=QTextEdit(); self.vis_log.setReadOnly(True); self.vis_log.setMaximumHeight(60); lay.addWidget(self.vis_log); return page
     def _vis_capture(self):
         cap=cv2.VideoCapture(self.cam_index_top); ret,f=cap.read(); cap.release()
@@ -871,28 +1076,21 @@ class RobotTeachApp(QMainWindow):
         r=YOLO(self.model_path)(f,conf=self.spin_conf.value()); self.vis_viewer.set_image(r[0].plot()); self.vis_status.setText(f"{len(r[0].boxes)} detections.")
 
     # =========================================================================
-    #  PAGE 4: PICK & PLACE — compact layout + step indicator
+    #  PAGE 4: PICK & PLACE
     # =========================================================================
-    PP_STEPS=[
-        "Step 1/5 – Capture & select PICK part.",
+    PP_STEPS=["Step 1/5 – Capture & select PICK part.",
         "Step 2/5 – Robot ABOVE pick. Jog XY. Save.",
         "Step 3/5 – Lower to PICK. Jog Z. Save (gripper CLOSES).",
         "Step 4/5 – Jog to PLACE approach. Save XY.",
-        "Step 5/5 – Lower to PLACE. Jog Z. Save (gripper OPENS → home).",
-    ]
+        "Step 5/5 – Lower to PLACE. Jog Z. Save (gripper OPENS → home).",]
     PP_SHORT = ["Detect", "Above Pick", "Pick", "Above Place", "Place"]
 
     def _page_pick_place(self):
         page=QWidget(); lay=QVBoxLayout(page); lay.setContentsMargins(12,10,12,8); lay.setSpacing(6)
-        # Header: title + step indicator
-        hdr=QHBoxLayout(); hdr.addWidget(self._mk_title("Pick & Place")); hdr.addStretch()
-        lay.addLayout(hdr)
+        hdr=QHBoxLayout(); hdr.addWidget(self._mk_title("Pick & Place")); hdr.addStretch(); lay.addLayout(hdr)
         self.pp_step_ind=StepIndicator(self.PP_SHORT); lay.addWidget(self.pp_step_ind)
-        self.pp_instruction=QLabel("Press 'Start New Routine'."); self.pp_instruction.setObjectName("step_instruction"); self.pp_instruction.setWordWrap(True)
-        lay.addWidget(self.pp_instruction)
-        # Content: camera left, controls right
+        self.pp_instruction=QLabel("Press 'Start New Routine'."); self.pp_instruction.setObjectName("step_instruction"); self.pp_instruction.setWordWrap(True); lay.addWidget(self.pp_instruction)
         content=QHBoxLayout(); content.setSpacing(10)
-        # --- LEFT: camera + detections ---
         left=QVBoxLayout(); left.setSpacing(6)
         self.pp_viewer=QLabel("Camera"); self.pp_viewer.setAlignment(Qt.AlignCenter)
         self.pp_viewer.setStyleSheet(f"background:#11111b;border:2px solid {BORDER};border-radius:10px;"); self.pp_viewer.setMinimumHeight(180)
@@ -902,25 +1100,19 @@ class RobotTeachApp(QMainWindow):
         self.pp_det_idx=QSpinBox(); self.pp_det_idx.setRange(0,99); self.pp_det_idx.setFixedWidth(50); ds.addWidget(self.pp_det_idx)
         self.btn_pp_select=QPushButton("Select & Move"); self.btn_pp_select.setObjectName("action"); self.btn_pp_select.clicked.connect(self._pp_select_detection); self.btn_pp_select.setEnabled(False); ds.addWidget(self.btn_pp_select)
         left.addLayout(ds); content.addLayout(left,stretch=3)
-        # --- RIGHT: position + jog + gripper + actions ---
         right=QVBoxLayout(); right.setSpacing(4)
-        # Position: X Y Z in one row
         pos_row=QHBoxLayout(); pos_row.setSpacing(3)
         self.pp_x=QDoubleSpinBox(); self.pp_x.setRange(-1000,1000); self.pp_x.setDecimals(1)
         self.pp_y=QDoubleSpinBox(); self.pp_y.setRange(-1000,1000); self.pp_y.setDecimals(1)
         self.pp_z=QDoubleSpinBox(); self.pp_z.setRange(-100,500); self.pp_z.setDecimals(1); self.pp_z.setValue(200)
-        for lbl,w in [("X",self.pp_x),("Y",self.pp_y),("Z",self.pp_z)]:
-            pos_row.addWidget(QLabel(lbl)); pos_row.addWidget(w,1)
+        for lbl,w in [("X",self.pp_x),("Y",self.pp_y),("Z",self.pp_z)]: pos_row.addWidget(QLabel(lbl)); pos_row.addWidget(w,1)
         right.addLayout(pos_row)
-        # Jog panel
         self.pp_jog=AdvancedJogPanel("Jog")
         self.pp_jog.jog_step.connect(lambda a,d: self._jog_step_from_robot(a,d,self.pp_x,self.pp_y,self.pp_z))
         self.pp_jog.jog_cont_start.connect(lambda a,s: self._jog_cont_start_from_robot(a,s,self.pp_jog.vel_slider.value()))
         self.pp_jog.jog_cont_stop.connect(lambda: (self._jog_cont_stop_common(),self._sync_spinboxes_from_robot(self.pp_x,self.pp_y,self.pp_z)))
         right.addWidget(self.pp_jog)
-        # Gripper
         self.pp_gripper=GripperPanel("Gripper"); self.pp_gripper.gripper_requested.connect(self._gripper_open_close); right.addWidget(self.pp_gripper)
-        # Action buttons — 2-column grid
         ag=QGridLayout(); ag.setSpacing(4)
         self.btn_pp_start=QPushButton("Start New Routine"); self.btn_pp_start.setObjectName("action"); self.btn_pp_start.clicked.connect(self._pp_start_routine)
         self.btn_pp_capture=QPushButton("Capture & Detect"); self.btn_pp_capture.setObjectName("action"); self.btn_pp_capture.clicked.connect(self._pp_capture_detect); self.btn_pp_capture.setEnabled(False)
@@ -929,17 +1121,14 @@ class RobotTeachApp(QMainWindow):
         self.btn_pp_add_cycle=QPushButton("Add Cycle"); self.btn_pp_add_cycle.setObjectName("action"); self.btn_pp_add_cycle.setEnabled(False); self.btn_pp_add_cycle.clicked.connect(self._pp_add_cycle)
         self.btn_pp_finish=QPushButton("Save Routine"); self.btn_pp_finish.setObjectName("action"); self.btn_pp_finish.setEnabled(False); self.btn_pp_finish.clicked.connect(self._pp_finish_routine)
         self.btn_pp_cancel=QPushButton("Cancel"); self.btn_pp_cancel.setObjectName("danger"); self.btn_pp_cancel.clicked.connect(self._pp_cancel_routine); self.btn_pp_cancel.setEnabled(False)
-        ag.addWidget(self.btn_pp_start,0,0);     ag.addWidget(self.btn_pp_cancel,0,1)
-        ag.addWidget(self.btn_pp_capture,1,0);   ag.addWidget(self.btn_pp_recapture,1,1)
+        ag.addWidget(self.btn_pp_start,0,0); ag.addWidget(self.btn_pp_cancel,0,1)
+        ag.addWidget(self.btn_pp_capture,1,0); ag.addWidget(self.btn_pp_recapture,1,1)
         ag.addWidget(self.btn_pp_save_wp,2,0,1,2)
         ag.addWidget(self.btn_pp_add_cycle,3,0); ag.addWidget(self.btn_pp_finish,3,1)
-        right.addLayout(ag); right.addStretch()
-        content.addLayout(right,stretch=2)
+        right.addLayout(ag); right.addStretch(); content.addLayout(right,stretch=2)
         lay.addLayout(content,stretch=1)
-        # Log at bottom
         self.pp_log=QTextEdit(); self.pp_log.setReadOnly(True); self.pp_log.setMaximumHeight(55); lay.addWidget(self.pp_log)
-        self._pp_style_buttons()
-        return page
+        self._pp_style_buttons(); return page
 
     def _pp_start_routine(self):
         dlg=ApproachZDialog(self,self.APPROACH_Z_DEFAULT)
@@ -949,8 +1138,7 @@ class RobotTeachApp(QMainWindow):
         self.btn_pp_start.setEnabled(False); self.btn_pp_capture.setEnabled(True)
         for b in [self.btn_pp_save_wp,self.btn_pp_select,self.btn_pp_add_cycle,self.btn_pp_finish,self.btn_pp_recapture]: b.setEnabled(False)
         self.btn_pp_cancel.setEnabled(True); self._pp_update_instruction()
-        self.pp_log.append(f"Approach Z = {self._guide_approach_z:.1f}")
-        self._pp_style_buttons()
+        self.pp_log.append(f"Approach Z = {self._guide_approach_z:.1f}"); self._pp_style_buttons()
     def _pp_update_instruction(self):
         self.pp_instruction.setText(self.PP_STEPS[self._guide_step] if self._guide_step<len(self.PP_STEPS) else "Cycle done! Add another or save routine.")
     def _pp_capture_detect(self):
@@ -963,8 +1151,7 @@ class RobotTeachApp(QMainWindow):
         results=self.current_model.predict(frame,conf=self.spin_conf.value())[0]
         ann=frame.copy(); self._guide_detections=[]; self.pp_det_list.clear()
         if len(results.boxes)==0:
-            self.pp_det_list.append("No detections."); self._show_cv_on_label(ann,self.pp_viewer); self.btn_pp_recapture.setEnabled(True)
-            self._pp_style_buttons(); return
+            self.pp_det_list.append("No detections."); self._show_cv_on_label(ann,self.pp_viewer); self.btn_pp_recapture.setEnabled(True); self._pp_style_buttons(); return
         for i,box in enumerate(results.boxes):
             x1,y1,x2,y2=box.xyxy[0].tolist(); uc,vc=(x1+x2)/2,(y1+y2)/2
             pt=cv2.perspectiveTransform(np.array([[[uc,vc]]],dtype=np.float32),self.H_inv)
@@ -975,18 +1162,15 @@ class RobotTeachApp(QMainWindow):
             cv2.putText(ann,f"[{i}] {lbl}",(int(x1),int(y1)-10),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,0),2)
             self.pp_det_list.append(f"[{i}] {lbl}: X={rx:.1f}, Y={ry:.1f} ({conf:.2f})")
         self._show_cv_on_label(ann,self.pp_viewer); self.pp_det_idx.setRange(0,len(self._guide_detections)-1)
-        self.btn_pp_select.setEnabled(True); self.btn_pp_capture.setEnabled(False); self.btn_pp_recapture.setEnabled(True)
-        self._pp_style_buttons()
+        self.btn_pp_select.setEnabled(True); self.btn_pp_capture.setEnabled(False); self.btn_pp_recapture.setEnabled(True); self._pp_style_buttons()
     def _pp_recapture(self):
         self._guide_detections=[]; self.pp_det_list.clear()
-        self.btn_pp_select.setEnabled(False); self.btn_pp_recapture.setEnabled(False); self.btn_pp_capture.setEnabled(True)
-        self._pp_style_buttons()
+        self.btn_pp_select.setEnabled(False); self.btn_pp_recapture.setEnabled(False); self.btn_pp_capture.setEnabled(True); self._pp_style_buttons()
     def _pp_cancel_routine(self):
         if QMessageBox.question(self,"Cancel","Discard?",QMessageBox.Yes|QMessageBox.No)!=QMessageBox.Yes: return
         self._guide_step=0; self._guide_waypoints=[]; self._guide_detections=[]; self.pp_det_list.clear()
         for b in [self.btn_pp_capture,self.btn_pp_recapture,self.btn_pp_save_wp,self.btn_pp_select,self.btn_pp_add_cycle,self.btn_pp_finish,self.btn_pp_cancel]: b.setEnabled(False)
-        self.btn_pp_start.setEnabled(True); self.pp_instruction.setText("Cancelled.")
-        self.pp_step_ind.reset(); self._pp_style_buttons()
+        self.btn_pp_start.setEnabled(True); self.pp_instruction.setText("Cancelled."); self.pp_step_ind.reset(); self._pp_style_buttons()
     def _pp_select_detection(self):
         idx=self.pp_det_idx.value()
         if idx>=len(self._guide_detections): return
@@ -1009,8 +1193,7 @@ class RobotTeachApp(QMainWindow):
             self._guide_waypoints.append({"label":"ascend_after_pick","x":x,"y":y,"z":az,"gripper":"close","move_type":"moveL"})
             self._robot_move_to(x,y,az,speed=self.MOVE_SPEED_SLOW,move_type="moveL")
             self.pp_x.setValue(x); self.pp_y.setValue(y); self.pp_z.setValue(az)
-            self._guide_step=3
-            self.btn_pp_save_wp.setEnabled(True)
+            self._guide_step=3; self.btn_pp_save_wp.setEnabled(True)
             self.btn_pp_capture.setEnabled(False); self.btn_pp_recapture.setEnabled(False)
             self.pp_log.append(f"Picked Z={z:.1f}. Jog to PLACE approach, then Save.")
         elif self._guide_step==3:
@@ -1040,26 +1223,21 @@ class RobotTeachApp(QMainWindow):
         self.pp_step_ind.set_all_done(); self._pp_style_buttons()
 
     # =========================================================================
-    #  PAGE 5: PALLETIZING — compact + step indicator
+    #  PAGE 5: PALLETIZING  (config dialog on start)
     # =========================================================================
-    PAL_STEPS=[
-        "Step 1/5 – Capture & select PICK part.",
+    PAL_STEPS=["Step 1/5 – Capture & select PICK part.",
         "Step 2/5 – Above pick. Jog XY. Save.",
         "Step 3/5 – Lower to pick. Jog Z. Save (gripper CLOSE).",
         "Step 4/5 – Jog to PALLET ORIGIN (1st cell). Save XY.",
-        "Step 5/5 – Lower to place. Jog Z. Save (gripper OPEN → home).",
-    ]
+        "Step 5/5 – Lower to place. Jog Z. Save (gripper OPEN → home).",]
     PAL_SHORT = ["Detect", "Above Pick", "Pick", "Pallet Origin", "Place"]
 
     def _page_palletize(self):
         page=QWidget(); lay=QVBoxLayout(page); lay.setContentsMargins(12,10,12,8); lay.setSpacing(6)
-        hdr=QHBoxLayout(); hdr.addWidget(self._mk_title("Palletizing")); hdr.addStretch()
-        lay.addLayout(hdr)
+        hdr=QHBoxLayout(); hdr.addWidget(self._mk_title("Palletizing")); hdr.addStretch(); lay.addLayout(hdr)
         self.pal_step_ind=StepIndicator(self.PAL_SHORT); lay.addWidget(self.pal_step_ind)
-        self.pal_instruction=QLabel("Press 'Start'."); self.pal_instruction.setObjectName("step_instruction"); self.pal_instruction.setWordWrap(True)
-        lay.addWidget(self.pal_instruction)
+        self.pal_instruction=QLabel("Press 'Start'."); self.pal_instruction.setObjectName("step_instruction"); self.pal_instruction.setWordWrap(True); lay.addWidget(self.pal_instruction)
         content=QHBoxLayout(); content.setSpacing(10)
-        # --- LEFT: camera + detections ---
         left=QVBoxLayout(); left.setSpacing(6)
         self.pal_viewer=QLabel("Camera"); self.pal_viewer.setAlignment(Qt.AlignCenter)
         self.pal_viewer.setStyleSheet(f"background:#11111b;border:2px solid {BORDER};border-radius:10px;"); self.pal_viewer.setMinimumHeight(160)
@@ -1069,49 +1247,22 @@ class RobotTeachApp(QMainWindow):
         self.pal_det_idx=QSpinBox(); self.pal_det_idx.setRange(0,99); self.pal_det_idx.setFixedWidth(50); ds.addWidget(self.pal_det_idx)
         self.btn_pal_select=QPushButton("Select"); self.btn_pal_select.setObjectName("action"); self.btn_pal_select.clicked.connect(self._pal_select_detection); self.btn_pal_select.setEnabled(False); ds.addWidget(self.btn_pal_select)
         left.addLayout(ds); content.addLayout(left,stretch=3)
-        # --- RIGHT ---
         right=QVBoxLayout(); right.setSpacing(4)
-        # Grid config — compact 2-column
-        gb=QGroupBox("Object & Grid"); gg=QGridLayout(gb); gg.setContentsMargins(6,16,6,4); gg.setHorizontalSpacing(4); gg.setVerticalSpacing(2)
-        self.pal_obj_w=QDoubleSpinBox(); self.pal_obj_w.setRange(1,500); self.pal_obj_w.setValue(50); self.pal_obj_w.setSuffix("mm")
-        self.pal_obj_d=QDoubleSpinBox(); self.pal_obj_d.setRange(1,500); self.pal_obj_d.setValue(50); self.pal_obj_d.setSuffix("mm")
-        self.pal_obj_h=QDoubleSpinBox(); self.pal_obj_h.setRange(1,500); self.pal_obj_h.setValue(20); self.pal_obj_h.setSuffix("mm")
-        self.pal_gap_x=QDoubleSpinBox(); self.pal_gap_x.setRange(0,100); self.pal_gap_x.setValue(5); self.pal_gap_x.setSuffix("mm")
-        self.pal_gap_y=QDoubleSpinBox(); self.pal_gap_y.setRange(0,100); self.pal_gap_y.setValue(5); self.pal_gap_y.setSuffix("mm")
-        self.pal_cols=QSpinBox(); self.pal_cols.setRange(1,20); self.pal_cols.setValue(3)
-        self.pal_rows=QSpinBox(); self.pal_rows.setRange(1,20); self.pal_rows.setValue(3)
-        self.pal_layers=QSpinBox(); self.pal_layers.setRange(1,10); self.pal_layers.setValue(1)
-        gg.addWidget(QLabel("W(X):"),0,0);  gg.addWidget(self.pal_obj_w,0,1)
-        gg.addWidget(QLabel("GapX:"),0,2);  gg.addWidget(self.pal_gap_x,0,3)
-        gg.addWidget(QLabel("L(Y):"),1,0);  gg.addWidget(self.pal_obj_d,1,1)
-        gg.addWidget(QLabel("GapY:"),1,2);  gg.addWidget(self.pal_gap_y,1,3)
-        gg.addWidget(QLabel("H(Z):"),2,0);  gg.addWidget(self.pal_obj_h,2,1)
-        gg.addWidget(QLabel("Layers:"),2,2);gg.addWidget(self.pal_layers,2,3)
-        gg.addWidget(QLabel("Cols:"),3,0);  gg.addWidget(self.pal_cols,3,1)
-        gg.addWidget(QLabel("Rows:"),3,2);  gg.addWidget(self.pal_rows,3,3)
-        self.pal_pitch_lbl=QLabel(); self.pal_pitch_lbl.setObjectName("subtitle"); self.pal_pitch_lbl.setWordWrap(True)
-        self._pal_update_pitch_preview()
-        for w in (self.pal_obj_w,self.pal_obj_d,self.pal_obj_h,self.pal_gap_x,self.pal_gap_y):
-            w.valueChanged.connect(self._pal_update_pitch_preview)
-        gg.addWidget(self.pal_pitch_lbl,4,0,1,4)
-        right.addWidget(gb)
-        # Position row
+        # Config summary (read-only, set by dialog)
+        self.pal_config_lbl=QLabel("No config set. Press Start."); self.pal_config_lbl.setObjectName("subtitle"); self.pal_config_lbl.setWordWrap(True)
+        right.addWidget(self.pal_config_lbl)
         pos_row=QHBoxLayout(); pos_row.setSpacing(3)
         self.pal_x=QDoubleSpinBox(); self.pal_x.setRange(-1000,1000); self.pal_x.setDecimals(1)
         self.pal_y=QDoubleSpinBox(); self.pal_y.setRange(-1000,1000); self.pal_y.setDecimals(1)
         self.pal_z=QDoubleSpinBox(); self.pal_z.setRange(-100,500); self.pal_z.setDecimals(1); self.pal_z.setValue(200)
-        for lbl,w in [("X",self.pal_x),("Y",self.pal_y),("Z",self.pal_z)]:
-            pos_row.addWidget(QLabel(lbl)); pos_row.addWidget(w,1)
+        for lbl,w in [("X",self.pal_x),("Y",self.pal_y),("Z",self.pal_z)]: pos_row.addWidget(QLabel(lbl)); pos_row.addWidget(w,1)
         right.addLayout(pos_row)
-        # Jog
         self.pal_jog=AdvancedJogPanel("Jog")
         self.pal_jog.jog_step.connect(lambda a,d: self._jog_step_from_robot(a,d,self.pal_x,self.pal_y,self.pal_z))
         self.pal_jog.jog_cont_start.connect(lambda a,s: self._jog_cont_start_from_robot(a,s,self.pal_jog.vel_slider.value()))
         self.pal_jog.jog_cont_stop.connect(lambda: (self._jog_cont_stop_common(),self._sync_spinboxes_from_robot(self.pal_x,self.pal_y,self.pal_z)))
         right.addWidget(self.pal_jog)
-        # Gripper
         self.pal_gripper=GripperPanel("Gripper"); self.pal_gripper.gripper_requested.connect(self._gripper_open_close); right.addWidget(self.pal_gripper)
-        # Actions
         ag=QGridLayout(); ag.setSpacing(4)
         self.btn_pal_start=QPushButton("Start"); self.btn_pal_start.setObjectName("action"); self.btn_pal_start.clicked.connect(self._pal_start)
         self.btn_pal_capture=QPushButton("Capture"); self.btn_pal_capture.setObjectName("action"); self.btn_pal_capture.clicked.connect(self._pal_capture); self.btn_pal_capture.setEnabled(False)
@@ -1119,25 +1270,43 @@ class RobotTeachApp(QMainWindow):
         self.btn_pal_save_wp=QPushButton("▶ SAVE WP"); self.btn_pal_save_wp.setObjectName("step_active"); self.btn_pal_save_wp.clicked.connect(self._pal_save_step); self.btn_pal_save_wp.setEnabled(False)
         self.btn_pal_finish=QPushButton("Save Routine"); self.btn_pal_finish.setObjectName("action"); self.btn_pal_finish.clicked.connect(self._pal_finish); self.btn_pal_finish.setEnabled(False)
         self.btn_pal_cancel=QPushButton("Cancel"); self.btn_pal_cancel.setObjectName("danger"); self.btn_pal_cancel.clicked.connect(self._pal_cancel); self.btn_pal_cancel.setEnabled(False)
-        ag.addWidget(self.btn_pal_start,0,0);     ag.addWidget(self.btn_pal_cancel,0,1)
-        ag.addWidget(self.btn_pal_capture,1,0);   ag.addWidget(self.btn_pal_recapture,1,1)
+        ag.addWidget(self.btn_pal_start,0,0); ag.addWidget(self.btn_pal_cancel,0,1)
+        ag.addWidget(self.btn_pal_capture,1,0); ag.addWidget(self.btn_pal_recapture,1,1)
         ag.addWidget(self.btn_pal_save_wp,2,0,1,2)
         ag.addWidget(self.btn_pal_finish,3,0,1,2)
-        right.addLayout(ag); right.addStretch()
-        content.addLayout(right,stretch=2)
+        right.addLayout(ag); right.addStretch(); content.addLayout(right,stretch=2)
         lay.addLayout(content,stretch=1)
         self.pal_log=QTextEdit(); self.pal_log.setReadOnly(True); self.pal_log.setMaximumHeight(50); lay.addWidget(self.pal_log)
-        self._pal_style_buttons()
-        return page
+        # Store pallet config from dialog (used at finish)
+        self._pal_dialog_config = {}
+        self._pal_style_buttons(); return page
 
-    def _pal_update_pitch_preview(self):
-        px=self.pal_obj_w.value()+self.pal_gap_x.value()
-        py=self.pal_obj_d.value()+self.pal_gap_y.value()
-        self.pal_pitch_lbl.setText(f"Pitch X={px:.0f}  Pitch Y={py:.0f}  ΔZ={self.pal_obj_h.value():.0f}")
     def _pal_start(self):
-        dlg=ApproachZDialog(self,self.APPROACH_Z_DEFAULT)
-        if dlg.exec()!=QDialog.Accepted: return
-        self._pal_approach_z=dlg.get_z(); self._pal_guide_step=0; self._pal_waypoints=[]; self._guide_detections=[]
+        """Open config dialog forcing operator to enter all grid measurements."""
+        defaults = {
+            "approach_z": self.APPROACH_Z_DEFAULT,
+            "obj_w": 50, "obj_d": 50, "obj_h": 20,
+            "gap_x": 5, "gap_y": 5, "cols": 3, "rows": 3, "layers": 1,
+        }
+        # Pre-fill from previous config if exists
+        if self._pal_dialog_config:
+            defaults.update(self._pal_dialog_config)
+        dlg = PalletConfigDialog(self, defaults)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        cfg = dlg.get_config()
+        self._pal_dialog_config = cfg
+        self._pal_approach_z = cfg["approach_z"]
+        # Update summary label
+        px = cfg["obj_w"] + cfg["gap_x"]; py = cfg["obj_d"] + cfg["gap_y"]
+        total = cfg["cols"] * cfg["rows"] * cfg["layers"]
+        self.pal_config_lbl.setText(
+            f"W={cfg['obj_w']:.0f} L={cfg['obj_d']:.0f} H={cfg['obj_h']:.0f}  "
+            f"Gap={cfg['gap_x']:.0f}/{cfg['gap_y']:.0f}  "
+            f"{cfg['cols']}×{cfg['rows']}×{cfg['layers']}={total}  "
+            f"Pitch={px:.0f}/{py:.0f}")
+        # Reset guide state
+        self._pal_guide_step=0; self._pal_waypoints=[]; self._guide_detections=[]
         self.pal_log.clear(); self.pal_det_list.clear()
         self.btn_pal_start.setEnabled(False); self.btn_pal_capture.setEnabled(True)
         for b in [self.btn_pal_save_wp,self.btn_pal_select,self.btn_pal_finish,self.btn_pal_recapture]: b.setEnabled(False)
@@ -1167,17 +1336,14 @@ class RobotTeachApp(QMainWindow):
         self._show_cv_on_label(ann,self.pal_viewer)
         if self._guide_detections:
             self.pal_det_idx.setRange(0,len(self._guide_detections)-1); self.btn_pal_select.setEnabled(True); self.btn_pal_capture.setEnabled(False)
-        self.btn_pal_recapture.setEnabled(True)
-        self._pal_style_buttons()
+        self.btn_pal_recapture.setEnabled(True); self._pal_style_buttons()
     def _pal_recapture(self):
-        self._guide_detections=[]; self.pal_det_list.clear(); self.btn_pal_select.setEnabled(False); self.btn_pal_recapture.setEnabled(False); self.btn_pal_capture.setEnabled(True)
-        self._pal_style_buttons()
+        self._guide_detections=[]; self.pal_det_list.clear(); self.btn_pal_select.setEnabled(False); self.btn_pal_recapture.setEnabled(False); self.btn_pal_capture.setEnabled(True); self._pal_style_buttons()
     def _pal_cancel(self):
         if QMessageBox.question(self,"Cancel","Discard?",QMessageBox.Yes|QMessageBox.No)!=QMessageBox.Yes: return
         self._pal_guide_step=0; self._pal_waypoints=[]; self._guide_detections=[]; self.pal_det_list.clear()
         for b in [self.btn_pal_capture,self.btn_pal_recapture,self.btn_pal_save_wp,self.btn_pal_select,self.btn_pal_finish,self.btn_pal_cancel]: b.setEnabled(False)
-        self.btn_pal_start.setEnabled(True); self.pal_instruction.setText("Cancelled.")
-        self.pal_step_ind.reset(); self._pal_style_buttons()
+        self.btn_pal_start.setEnabled(True); self.pal_instruction.setText("Cancelled."); self.pal_step_ind.reset(); self._pal_style_buttons()
     def _pal_select_detection(self):
         idx=self.pal_det_idx.value()
         if idx>=len(self._guide_detections): return
@@ -1197,8 +1363,7 @@ class RobotTeachApp(QMainWindow):
             self._pal_waypoints.append({"label":"ascend_after_pick","x":x,"y":y,"z":az,"gripper":"close","move_type":"moveL"})
             self._robot_move_to(x,y,az,speed=self.MOVE_SPEED_SLOW,move_type="moveL")
             self.pal_x.setValue(x); self.pal_y.setValue(y); self.pal_z.setValue(az)
-            self._pal_guide_step=3
-            self.btn_pal_save_wp.setEnabled(True)
+            self._pal_guide_step=3; self.btn_pal_save_wp.setEnabled(True)
             self.btn_pal_capture.setEnabled(False); self.btn_pal_recapture.setEnabled(False)
             self.pal_log.append("Picked. Jog to PALLET ORIGIN, then Save.")
         elif self._pal_guide_step==3:
@@ -1211,25 +1376,26 @@ class RobotTeachApp(QMainWindow):
             self._robot_move_to(x,y,az,speed=self.MOVE_SPEED_SLOW,move_type="moveL")
             self._go_home_and_append(self._pal_waypoints)
             self._pal_guide_step=5; self.btn_pal_save_wp.setEnabled(False); self.btn_pal_finish.setEnabled(True)
-            px=self.pal_obj_w.value()+self.pal_gap_x.value()
-            py=self.pal_obj_d.value()+self.pal_gap_y.value()
-            self.pal_log.append(
-                f"Place Z={z:.1f}. Grid: Pitch X={px:.1f}, Y={py:.1f}, ΔZ={self.pal_obj_h.value():.1f}")
+            cfg=self._pal_dialog_config; px=cfg["obj_w"]+cfg["gap_x"]; py=cfg["obj_d"]+cfg["gap_y"]
+            self.pal_log.append(f"Place Z={z:.1f}. Grid: Pitch X={px:.1f}, Y={py:.1f}, ΔZ={cfg['obj_h']:.1f}")
         self._pal_update_instruction(); self._pal_style_buttons()
     def _pal_finish(self):
         name,ok=QInputDialog.getText(self,"Name","Routine name:")
         if not ok or not name.strip(): return
         name=name.strip().replace(" ","_")
-        pc={"obj_w":self.pal_obj_w.value(),"obj_d":self.pal_obj_d.value(),"obj_h":self.pal_obj_h.value(),
-            "cols":self.pal_cols.value(),"rows":self.pal_rows.value(),"layers":self.pal_layers.value(),
-            "gap_x":self.pal_gap_x.value(),"gap_y":self.pal_gap_y.value()}
+        cfg=self._pal_dialog_config
+        pc={"obj_w":cfg["obj_w"],"obj_d":cfg["obj_d"],"obj_h":cfg["obj_h"],
+            "cols":cfg["cols"],"rows":cfg["rows"],"layers":cfg["layers"],
+            "gap_x":cfg["gap_x"],"gap_y":cfg["gap_y"]}
         r=Routine(name=name,routine_type="palletizing",waypoints=self._pal_waypoints,pallet_config=pc,approach_z=self._pal_approach_z)
         self._save_routine(r); self.pal_log.append(f"'{name}' saved."); self.btn_pal_start.setEnabled(True)
         for b in [self.btn_pal_finish,self.btn_pal_recapture,self.btn_pal_cancel]: b.setEnabled(False)
         self.pal_instruction.setText("Saved!"); self.dash_routines_lbl.setText(f"Routines: {len(self._list_routines())}")
         self.pal_step_ind.set_all_done(); self._pal_style_buttons()
 
-    # ===== PAGE 6: PRODUCTION =====
+    # =========================================================================
+    #  PAGE 6: PRODUCTION  (E-STOP aware loops)
+    # =========================================================================
     def _page_production(self):
         page=QWidget(); scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         cw=QWidget(); lay=QVBoxLayout(cw); lay.setContentsMargins(16,16,16,16); lay.setSpacing(8)
@@ -1261,7 +1427,7 @@ class RobotTeachApp(QMainWindow):
         self.prod_delay_lbl=QLabel("1.0s"); self.prod_delay_lbl.setFixedWidth(30); self.prod_delay_slider.valueChanged.connect(lambda v: self.prod_delay_lbl.setText(f"{v/10:.1f}s"))
         r3.addWidget(self.prod_delay_slider,1); r3.addWidget(self.prod_delay_lbl)
         brun=QPushButton("RUN"); brun.setObjectName("action"); brun.clicked.connect(self._prod_run); r3.addWidget(brun)
-        bstop=QPushButton("E-STOP"); bstop.setObjectName("danger"); bstop.clicked.connect(self._prod_stop); r3.addWidget(bstop)
+        bstop=QPushButton("⛔ E-STOP"); bstop.setObjectName("estop"); bstop.clicked.connect(self._prod_stop); r3.addWidget(bstop)
         ml.addLayout(r3); lay.addWidget(mb)
         mg=QGroupBox("Manage Routines"); mgl=QHBoxLayout(mg); mgl.setContentsMargins(10,20,10,8); mgl.setSpacing(6)
         self.prod_routine_list=QListWidget(); mgl.addWidget(self.prod_routine_list,1)
@@ -1324,6 +1490,7 @@ class RobotTeachApp(QMainWindow):
         if not self.prod_routine_combo.count(): QMessageBox.warning(self,"","No routines."); return
         rn=self.prod_routine_combo.currentData(); routine=self._load_routine(rn)
         if not routine: return
+        self._estop_flag=False  # reset E-STOP before run
         cycles=self.prod_cycles.value(); speed=self.prod_vel_slider.value(); delay=self.prod_delay_slider.value()/10.0
         self.prod_status.setText(f"RUNNING: {routine.name} x {cycles}")
         self.prod_status.setStyleSheet(f"color:{SUCCESS};font-weight:bold;font-size:13px;")
@@ -1333,16 +1500,27 @@ class RobotTeachApp(QMainWindow):
             self._prod_run_pal(routine,cycles,speed,delay)
         else:
             self._prod_run_pp(routine,cycles,speed,delay)
+
     def _prod_run_pp(self, routine, cycles, speed, delay):
         for c in range(cycles):
+            if self._estop_flag: break
             self.prod_log.append(f"\n--- Cycle {c+1}/{cycles} ---")
             for wp in routine.waypoints:
+                if self._estop_flag: break
                 self.prod_log.append(f"  -> {wp['label']}: ({wp['x']:.1f},{wp['y']:.1f},{wp['z']:.1f})")
                 self._robot_move_to(wp["x"],wp["y"],wp["z"],speed=speed,move_type=wp.get("move_type","moveL"))
+                if self._estop_flag: break
                 g=wp.get("gripper")
-                if g in ("open","close"): self._gripper_open_close(g); time.sleep(delay)
+                if g in ("open","close"):
+                    self._gripper_open_close(g)
+                    # Interruptible delay
+                    self._interruptible_sleep(delay)
                 QApplication.processEvents()
-        self.prod_log.append("\nDone."); self.prod_status.setText("Idle.")
+        if self._estop_flag:
+            self.prod_log.append("\n⛔ ABORTED BY E-STOP"); self.prod_status.setText("E-STOP")
+        else:
+            self.prod_log.append("\nDone."); self.prod_status.setText("Idle.")
+
     def _prod_run_pal(self, routine, cycles, speed, delay):
         cfg=routine.pallet_config; cols,rows,layers=cfg["cols"],cfg["rows"],cfg["layers"]
         pitch_x = cfg["obj_w"] + cfg["gap_x"]
@@ -1361,55 +1539,84 @@ class RobotTeachApp(QMainWindow):
         for wp in routine.waypoints:
             if wp["label"]=="return_home": home_wp=wp; break
         grid_size=cols*rows*layers
-        self.prod_log.append(f"  Grid {cols}x{rows}x{layers}={grid_size}  PitchX={pitch_x:.1f} PitchY={pitch_y:.1f} ΔZ={layer_dz:.1f}")
+        self.prod_log.append(f"  Grid {cols}x{rows}x{layers}={grid_size}  PitchX=+{pitch_x:.1f} PitchY=-{pitch_y:.1f} ΔZ=+{layer_dz:.1f}")
         for cycle_num in range(cycles):
+            if self._estop_flag: break
             self.prod_log.append(f"\n=== Grid fill {cycle_num+1}/{cycles} ===")
             cell=0
             for L in range(layers):
+                if self._estop_flag: break
                 for R in range(rows):
+                    if self._estop_flag: break
                     for C in range(cols):
+                        if self._estop_flag: break
                         self.prod_log.append(f"  Cell {cell+1}/{grid_size} [C{C} R{R} L{L}]")
                         for wp in pick_wps:
+                            if self._estop_flag: break
                             self._robot_move_to(wp["x"],wp["y"],wp["z"],speed=speed,move_type=wp.get("move_type","moveL"))
                             g=wp.get("gripper")
-                            if g in ("open","close"): self._gripper_open_close(g); time.sleep(delay)
+                            if g in ("open","close"):
+                                self._gripper_open_close(g); self._interruptible_sleep(delay)
                             QApplication.processEvents()
-                        ox=pw["x"]+C*pitch_x; oy=pw["y"]+R*pitch_y; oz=pw["z"]+L*layer_dz; az_=aw["z"]+L*layer_dz
+                        if self._estop_flag: break
+                        ox=pw["x"]+C*pitch_x; oy=pw["y"]-R*pitch_y; oz=pw["z"]+L*layer_dz; az_=aw["z"]+L*layer_dz
                         self._robot_move_to(ox,oy,az_,speed=speed,move_type="moveJ")
+                        if self._estop_flag: break
                         self._robot_move_to(ox,oy,oz,speed=max(speed//3,10),move_type="moveL")
-                        self._gripper_open_close("open"); time.sleep(delay)
+                        if self._estop_flag: break
+                        self._gripper_open_close("open"); self._interruptible_sleep(delay)
+                        if self._estop_flag: break
                         self._robot_move_to(ox,oy,az_,speed=max(speed//3,10),move_type="moveL")
-                        if home_wp:
+                        if home_wp and not self._estop_flag:
                             self._robot_move_to(home_wp["x"],home_wp["y"],home_wp["z"],speed=speed,move_type="moveJ")
                         cell+=1; QApplication.processEvents()
-        self.prod_log.append(f"\n{cell*cycles} total cells done."); self.prod_status.setText("Idle.")
+        if self._estop_flag:
+            self.prod_log.append(f"\n⛔ ABORTED BY E-STOP after {cell} cells"); self.prod_status.setText("E-STOP")
+        else:
+            self.prod_log.append(f"\n{cell*cycles} total cells done."); self.prod_status.setText("Idle.")
+
     def _prod_stop(self):
+        """Production E-STOP: halt robot AND break the loop."""
+        self._global_estop()
         self.prod_status.setText("E-STOP")
-        if self.robot: self.robot.set_state(4); self.prod_log.append("E-STOP SENT")
+        self.prod_log.append("⛔ E-STOP SENT")
+
+    def _interruptible_sleep(self, seconds):
+        """Sleep in small increments, checking E-STOP between each."""
+        elapsed = 0.0
+        step = 0.05
+        while elapsed < seconds:
+            if self._estop_flag: return
+            time.sleep(step)
+            elapsed += step
+            QApplication.processEvents()
 
     # ===== ROBOT HELPERS =====
     def _ensure_robot_ready(self):
-        if not self.robot: return
+        if not self.robot or self._estop_flag: return
         try: self.robot.clean_error(); self.robot.clean_warn(); self.robot.set_mode(0); self.robot.set_state(0)
         except: pass
+
     def _robot_move_to(self, x, y, z, roll=-180, pitch=0, yaw=0, speed=100, move_type="moveL"):
-        if not self.robot: return
+        if not self.robot or self._estop_flag: return
         try:
             self.robot.set_state(0)
             mvacc=1000 if move_type=="moveJ" else 500
             code=self.robot.set_position(x=x,y=y,z=z,roll=roll,pitch=pitch,yaw=yaw,speed=speed,mvacc=mvacc,wait=True)
-            if code!=0:
+            if code!=0 and not self._estop_flag:
                 print(f"[Motion] code={code}, recovering..."); self._ensure_robot_ready()
                 self.robot.set_position(x=x,y=y,z=z,roll=roll,pitch=pitch,yaw=yaw,speed=speed,mvacc=mvacc,wait=True)
         except Exception as e: print(f"[Motion] {e}")
+
     def _robot_move_to_guarded(self, x, y, z, roll=-180, pitch=0, yaw=0, speed=100, move_type="moveL", wait=True):
-        if self._motion_busy or not self.robot: return
+        if self._motion_busy or not self.robot or self._estop_flag: return
         self._motion_busy=True
         try:
             self.robot.set_state(0); mvacc=1000 if move_type=="moveJ" else 500
             self.robot.set_position(x=x,y=y,z=z,roll=roll,pitch=pitch,yaw=yaw,speed=speed,mvacc=mvacc,wait=wait)
         except Exception as e: print(f"[Jog] {e}")
         finally: self._motion_busy=False
+
     def _gripper_enable(self, enable):
         if not self.robot: return
         try:
